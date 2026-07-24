@@ -9,10 +9,15 @@ class HileService {
   final GameState state = GameState();
   BestMoveEngine? engine;
 
-  // Default empty — user should paste their own session or use capture values.
+  // Email + password login (preferred). Server derives PID + hash for us.
+  String email = '';
+  String password = '';
+
+  // Advanced/manual fallback (filled automatically after a successful email login).
   int pid = 0;
   String passwordHex = '';
   int loginThird = 432;
+  String username = '';
 
   String status = 'Hazir';
   Move? lastMove;
@@ -24,6 +29,30 @@ class HileService {
     status = 'Sozluk: ${engine!.dict.length} kelime';
   }
 
+  /// Preferred flow: connect + email/password login (email -> PID/hash -> login).
+  Future<void> connectAndEmailLogin() async {
+    status = 'Baglaniyor...';
+    await client.connect();
+    if (email.trim().isEmpty || password.isEmpty) {
+      status = 'E-posta ve sifre girin';
+      return;
+    }
+    status = 'Giris yapiliyor...';
+    final res = await client.emailLogin(email.trim(), password, third: loginThird);
+    if (!res.ok) {
+      status = res.message;
+      return;
+    }
+    pid = res.pid;
+    passwordHex = res.hash;
+    username = res.username;
+    client.updateDeviceInfo(platform: 'ios', deviceId: 'kelimelik-ios-hile');
+    status = 'Login OK — ${username.isEmpty ? 'PID $pid' : username}';
+    _attachGameListeners();
+    client.requestUserGames();
+  }
+
+  /// Manual fallback flow: connect + login with a raw PID + password hash.
   Future<void> connectAndLogin() async {
     status = 'Baglaniyor...';
     await client.connect();
@@ -40,8 +69,10 @@ class HileService {
     }
     client.updateDeviceInfo(platform: 'ios', deviceId: 'kelimelik-ios-hile');
     status = 'Login OK';
+    _attachGameListeners();
+  }
 
-    // keep listening gameInfo
+  void _attachGameListeners() {
     client.on('GameModule_gameInfo').listen((f) {
       state.applyGameInfo(f.values);
       status = 'gameInfo gid=${state.gameId} rack=${state.rack}';

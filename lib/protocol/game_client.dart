@@ -72,6 +72,83 @@ class KelimelikClient {
     send('GameModule_requestLogin', body);
   }
 
+  /// Step 1 of email login: precheck that the account exists.
+  void submitEmail(String email) {
+    send('GameModule_requestCreateAccountSubmitEmail',
+        ProtoCodec.encList([ProtoCodec.encStr(email.trim())]));
+  }
+
+  /// Step 2 of email login: send email + PLAINTEXT password.
+  /// The server replies with a createAccountResponse carrying PID + password hash.
+  void retrieveAccount(String email, String password) {
+    send('GameModule_requestRetrieveAccount', ProtoCodec.encList([
+      ProtoCodec.encStr(email.trim()),
+      ProtoCodec.encStr(password),
+    ]));
+  }
+
+  /// Full email + password login. Verified against the real client via RE:
+  ///   1) requestCreateAccountSubmitEmail(email)  -> server confirms email exists
+  ///   2) requestRetrieveAccount(email, password) -> server returns PID + hash
+  ///   3) requestLogin(PID, hash, 432)            -> loginAccepted
+  /// We never compute the hash ourselves; the server derives it and returns it.
+  Future<EmailLoginResult> emailLogin(String email, String password,
+      {int third = 432}) async {
+    // 1) email precheck (best-effort; we don't depend on its exact response)
+    submitEmail(email);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+
+    // 2) retrieve account -> find the frame that carries PID + 64-hex hash
+    retrieveAccount(email, password);
+    final resp = await waitForAny(
+      (f) => _extractAccount(f) != null,
+      timeout: const Duration(seconds: 12),
+    );
+    final acct = resp == null ? null : _extractAccount(resp);
+    if (acct == null) {
+      return EmailLoginResult(
+          false, 0, '', 'Hesap bilgisi alinamadi (e-posta/sifre hatali olabilir).');
+    }
+
+    // 3) login with the server-provided PID + hash
+    login(pid: acct.pid, passwordHex: acct.hash, third: third);
+    final ok = await waitFor('GameModule_loginAccepted',
+        timeout: const Duration(seconds: 10));
+    if (ok == null) {
+      return EmailLoginResult(
+          false, acct.pid, acct.hash, 'Login zaman asimi (PID ${acct.pid}).');
+    }
+    return EmailLoginResult(true, acct.pid, acct.hash, 'Login OK',
+        username: acct.username);
+  }
+
+  /// Parse a createAccountResponse-style frame into (PID, hash[64], username).
+  /// Returns null if the frame does not contain a valid PID + 64-hex hash.
+  _Account? _extractAccount(ProtoFrame f) {
+    final vals = f.values;
+    int pid = 0;
+    String hash = '';
+    String username = '';
+    final hex64 = RegExp(r'^[0-9a-fA-F]{64}$');
+    for (final v in vals) {
+      if (v.type == 'int' && v.asInt > 0 && pid == 0) {
+        pid = v.asInt;
+      } else if (v.type == 'str') {
+        final s = v.asStr;
+        if (s.length == 64 && hex64.hasMatch(s)) {
+          hash = s;
+        } else if (username.isEmpty &&
+            s.isNotEmpty &&
+            !s.contains('@') &&
+            s.length <= 32) {
+          username = s;
+        }
+      }
+    }
+    if (pid > 0 && hash.isNotEmpty) return _Account(pid, hash, username);
+    return null;
+  }
+
   void updateDeviceInfo({String platform = 'ios', String deviceId = 'ios-hile-rebuild'}) {
     final body = ProtoCodec.encList([
       ProtoCodec.encStr(platform),
@@ -82,6 +159,11 @@ class KelimelikClient {
 
   void requestGameInfo(int gameId) {
     send('GameModule_requestGameInfo', ProtoCodec.encList([ProtoCodec.encInt(gameId)]));
+  }
+
+  /// Ask the server for the user's active games list.
+  void requestUserGames() {
+    send('GameModule_requestUserGamesList');
   }
 
   /// Confirmed working submit (Android RE):
@@ -120,6 +202,19 @@ class KelimelikClient {
     }
   }
 
+  /// Wait for ANY incoming frame that satisfies [test], regardless of name.
+  /// Useful when the exact response frame name is uncertain.
+  Future<ProtoFrame?> waitForAny(
+    bool Function(ProtoFrame f) test, {
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    try {
+      return await frames.where(test).first.timeout(timeout);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void dispose() {
     disconnect();
     for (final c in _controllers.values) {
@@ -127,6 +222,24 @@ class KelimelikClient {
     }
     _all.close();
   }
+}
+
+/// Result of an email + password login attempt.
+class EmailLoginResult {
+  final bool ok;
+  final int pid;
+  final String hash;
+  final String message;
+  final String username;
+  EmailLoginResult(this.ok, this.pid, this.hash, this.message,
+      {this.username = ''});
+}
+
+class _Account {
+  final int pid;
+  final String hash;
+  final String username;
+  _Account(this.pid, this.hash, this.username);
 }
 
 class GameState {

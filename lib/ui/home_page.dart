@@ -12,13 +12,14 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final svc = HileService();
-  final pidCtrl = TextEditingController();
-  final passCtrl = TextEditingController();
+  final emailCtrl = TextEditingController();
+  final passwordCtrl = TextEditingController();
   final gameIdCtrl = TextEditingController();
   final rackCtrl = TextEditingController();
   final boardCtrl = TextEditingController();
   String log = '';
   bool busy = false;
+  bool obscure = true;
   List<Move> candidates = [];
 
   @override
@@ -40,9 +41,9 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _login() async {
     setState(() => busy = true);
-    svc.pid = int.tryParse(pidCtrl.text.trim()) ?? 0;
-    svc.passwordHex = passCtrl.text.trim();
-    await svc.connectAndLogin();
+    svc.email = emailCtrl.text.trim();
+    svc.password = passwordCtrl.text;
+    await svc.connectAndEmailLogin();
     _syncFieldsFromState();
     setState(() {
       log = svc.status;
@@ -96,8 +97,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     svc.dispose();
-    pidCtrl.dispose();
-    passCtrl.dispose();
+    emailCtrl.dispose();
+    passwordCtrl.dispose();
     gameIdCtrl.dispose();
     rackCtrl.dispose();
     boardCtrl.dispose();
@@ -115,23 +116,34 @@ class _HomePageState extends State<HomePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('1) Oturum (Android RE ile ayni protokol)', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text('1) Giris (e-posta + sifre)', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           TextField(
-            controller: pidCtrl,
-            decoration: const InputDecoration(labelText: 'PID (sayi)', border: OutlineInputBorder()),
-            keyboardType: TextInputType.number,
+            controller: emailCtrl,
+            decoration: const InputDecoration(labelText: 'E-posta', border: OutlineInputBorder()),
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+            textInputAction: TextInputAction.next,
           ),
           const SizedBox(height: 8),
           TextField(
-            controller: passCtrl,
-            decoration: const InputDecoration(labelText: 'Password hash (hex)', border: OutlineInputBorder()),
+            controller: passwordCtrl,
+            obscureText: obscure,
+            decoration: InputDecoration(
+              labelText: 'Sifre',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
+                onPressed: () => setState(() => obscure = !obscure),
+              ),
+            ),
+            onSubmitted: (_) => busy ? null : _login(),
           ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             children: [
-              FilledButton(onPressed: busy ? null : _login, child: const Text('Baglan + Login')),
+              FilledButton(onPressed: busy ? null : _login, child: const Text('Giris yap')),
               OutlinedButton(onPressed: busy ? null : _refresh, child: const Text('gameInfo yenile')),
             ],
           ),
@@ -202,8 +214,8 @@ class _HomePageState extends State<HomePage> {
               )),
           const SizedBox(height: 24),
           const Text(
-            'Not: Bu proje Android RE ile cikarilan sunucu protokolu + solver uzerine\n'
-            'iOS Flutter yeniden insasidir. IPA derlemesi Mac + Xcode ister.',
+            'Not: Giris e-posta + sifre ile yapilir. Sunucu PID + hash uretir,\n'
+            'istemci bunlarla oturum acar. IPA derlemesi Codemagic/Mac ister.',
             style: TextStyle(fontSize: 12, color: Colors.black54),
           ),
         ],

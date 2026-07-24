@@ -9,12 +9,6 @@ workflows:
       cocoapods: default
       vars:
         BUNDLE_ID: "com.example.kelimelikIosHile"
-      # Codemagic UI'dan ekle:
-      # - App Store Connect API key VEYA
-      # - Development certificate + provisioning profile
-      # ios_signing:
-      #   distribution_type: ad_hoc   # veya development / app_store
-      #   bundle_identifier: $BUNDLE_ID
     scripts:
       - name: Flutter create iOS platform files
         script: |
@@ -24,6 +18,7 @@ workflows:
           flutter pub get
       - name: Install pods
         script: |
+          find . -name "Podfile" -path "*/ios/*" | head -1
           cd ios
           pod install
       - name: Flutter analyze (non-blocking)
@@ -31,15 +26,10 @@ workflows:
           flutter analyze || true
       - name: Build IPA
         script: |
-          # Imzasiz/unsigned deneme (signing ayarlanmadiysa hata verebilir)
-          # Codemagic'de Code signing identity bagladiktan sonra:
-          flutter build ipa --release --no-codesign || flutter build ipa --release
+          # First try unsigned (no Apple cert). If Codemagic signing is configured, signed build works too.
+          flutter build ipa --release --no-codesign
     artifacts:
       - build/ios/ipa/*.ipa
       - build/ios/archive/*.xcarchive
-    publishing:
-      email:
-        recipients: []
-        notify:
-          success: true
-          failure: true
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
